@@ -11,10 +11,57 @@ def main(event:, context:)
 end
 
 def response(body: nil, status: 200)
-  {
-    body: body ? body.to_json + "\n" : '',
-    statusCode: status
-  }
+  # check if this gives an error
+  begin
+    JSON.parse(body.to_json)
+  rescue JSON::ParserError
+    return { statusCode: 422 }
+  end
+
+  if body["path"] == '/token'
+    if body["httpMethod"] != "POST"
+      return { statusCode: 405 }
+    end
+    if body["headers"]["Content-Type"] != "application/json"
+      return  {
+        statusCode: 415,
+      }
+    end
+    # Generate a token
+    payload = {
+      data: body["body"],
+      exp: Time.now.to_i + 5,
+      nbf: Time.now.to_i + 2
+    }
+    token = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
+    return {
+      body: body ? body.to_json + "\n" : '',
+      statusCode: 201,
+      token: token
+    }
+  elsif body["path"] == '/'
+    if body["httpMethod"] != "GET"
+      return { statusCode: 405 }
+    end
+    authorization_header = body["headers"]["Authorization"]
+    # Split the string
+    bearer = authorization_header[0, 7] 
+    token = authorization_header[7..-1]
+    if bearer != "Bearer "
+      return { statusCode: 403 }
+    end
+    decoded = JWT.decode token, ENV['JWT_SECRET'], 'HS256'
+    decoded_payload = decoded[0]  # Access the first element (the payload)
+    if Time.now.to_i >= decoded_payload["exp"] or Time.now.to_i < decoded_payload["nbf"]
+      return { statusCode: 401 }
+    end 
+    return {
+      body: decoded_payload["data"] ? decoded_payload["data"].to_json + "\n" : '',
+      statusCode: 200
+    }
+  else 
+    return { statusCode: 404 }
+  end
 end
 
 if $PROGRAM_NAME == __FILE__
