@@ -7,61 +7,79 @@ require 'pp'
 def main(event:, context:)
   # You shouldn't need to use context, but its fields are explained here:
   # https://docs.aws.amazon.com/lambda/latest/dg/ruby-context.html
-  response(body: event, status: 200)
+  if event["path"] == '/auth/token'
+    if event["httpMethod"] != "POST"
+      return { statusCode: 405 }
+    end
+
+    headers = event["headers"].transform_keys(&:downcase)
+    if headers["content-type"] != "application/json"
+      return { statusCode: 415 }
+    end
+
+    begin
+      if event["body"].nil?
+        return response(status: 422)
+      end
+      parsed_body = JSON.parse(event["body"])
+      payload = {
+        data: parsed_body,
+        exp: Time.now.to_i + 5,
+        nbf: Time.now.to_i + 2
+      }
+      token = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
+      resp = {"token" => token}
+      return response(body: resp, status: 201)
+    rescue JSON::ParserError
+      return response(status: 422)
+    end
+    
+
+
+  elsif event["path"] == '/'
+    begin 
+      if event["httpMethod"] != "GET"
+        return { statusCode: 405 }
+      end
+      begin 
+        headers = event["headers"].transform_keys(&:downcase)
+        authorization_header = headers["authorization"]
+        # Split the string
+        bearer = authorization_header[0, 7] 
+        if bearer != "Bearer "
+          return response(body: "BEARER1", status: 403)
+        end
+      rescue
+        return response(body: "BEARER", status: 403)
+      end
+      token = authorization_header[7..-1]
+      begin
+        decoded = JWT.decode token, ENV['JWT_SECRET'], true, {algorithm: 'HS256'}
+        decoded_payload = decoded[0]
+      rescue JWT::ImmatureSignature
+        return response(status: 401)
+      rescue JWT::ExpiredSignature
+        return response(status: 401)
+      rescue JWT::DecodeError => e
+        return response(body: "DECODING", status: 403)
+      end
+      resp = decoded_payload["data"]
+      return response(body: resp, status: 200)
+    rescue
+      # MINE
+      return response(status: 425)
+    end
+    else 
+      return response(status: 404)
+    end
 end
 
 def response(body: nil, status: 200)
   # check if this gives an error
-  begin
-    JSON.parse(body.to_json)
-  rescue JSON::ParserError
-    return { statusCode: 422 }
-  end
-
-  if body["path"] == '/token'
-    if body["httpMethod"] != "POST"
-      return { statusCode: 405 }
-    end
-    if body["headers"]["Content-Type"] != "application/json"
-      return  {
-        statusCode: 415,
-      }
-    end
-    # Generate a token
-    payload = {
-      data: body["body"],
-      exp: Time.now.to_i + 5,
-      nbf: Time.now.to_i + 2
-    }
-    token = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
-    return {
-      body: body ? body.to_json + "\n" : '',
-      statusCode: 201,
-      token: token
-    }
-  elsif body["path"] == '/'
-    if body["httpMethod"] != "GET"
-      return { statusCode: 405 }
-    end
-    authorization_header = body["headers"]["Authorization"]
-    # Split the string
-    bearer = authorization_header[0, 7] 
-    token = authorization_header[7..-1]
-    if bearer != "Bearer "
-      return { statusCode: 403 }
-    end
-    decoded = JWT.decode token, ENV['JWT_SECRET'], 'HS256'
-    decoded_payload = decoded[0]  # Access the first element (the payload)
-    if Time.now.to_i >= decoded_payload["exp"] or Time.now.to_i < decoded_payload["nbf"]
-      return { statusCode: 401 }
-    end 
-    return {
-      body: decoded_payload["data"] ? decoded_payload["data"].to_json + "\n" : '',
-      statusCode: 200
-    }
-  else 
-    return { statusCode: 404 }
-  end
+  {
+    body: body ? body.to_json + "\n" : '',
+    statusCode: status
+  }
 end
 
 if $PROGRAM_NAME == __FILE__
@@ -71,24 +89,31 @@ if $PROGRAM_NAME == __FILE__
   ENV['JWT_SECRET'] = 'NOTASECRET'
 
   # Call /token
-  PP.pp main(context: {}, event: {
-               'body' => '{"name": "bboe"}',
-               'headers' => { 'Content-Type' => 'application/json' },
-               'httpMethod' => 'POST',
-               'path' => '/token'
-             })
+  # Call your function and get the response
+  response = main(context: {}, event: {
+    'body' => '{"cool": "123"}',
+    'headers' => { 'ConteNt-Type' => 'application/json' },
+    'httpMethod' => 'POST',
+    'path' => '/auth/token'
+  })
 
-  # Generate a token
-  payload = {
-    data: { user_id: 128 },
-    exp: Time.now.to_i + 1,
-    nbf: Time.now.to_i
-  }
-  token = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
-  # Call /
+  token = response[:body]
+
+  json_object = JSON.parse(token)
+
+  # Now you can use json_object as a hash
+  puts json_object["token"]
+  # # Generate a token
+  # payload = {
+  #   data: { user_id: 128 },
+  #   exp: Time.now.to_i + 1,
+  #   nbf: Time.now.to_i
+  # }
+  # token = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
+  # # # # Call /
   PP.pp main(context: {}, event: {
-               'headers' => { 'Authorization' => "Bearer #{token}",
-                              'Content-Type' => 'application/json' },
+               'headers' => { 'Content-Type' => 'application/json',
+              'AuthorizaTion' => "Bearer #{json_object['token']}" },
                'httpMethod' => 'GET',
                'path' => '/'
              })
