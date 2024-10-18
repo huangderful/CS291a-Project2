@@ -1,0 +1,22 @@
+### Question 1:
+
+Command: ab -c 256 -t 8 https://fyxic8g92i.execute-api.us-west-2.amazonaws.com/prod/auth/token
+1: 47 
+2: 95
+4: 189
+8: 366
+16: 702
+32: 1245
+64: 1789
+128: 2075
+256: 1854
+
+### Question 2:
+In terms of trajectory, it performs in a similar shape in the dimininshing returns at higher concurrency levels.
+However in terms of raw power it is outperformed by Github by about 200x.
+
+
+### Question 3:
+Probably because of cold starts (the architecture not loading branch predictors), more serverside computations,
+and less locations aka Lammbda probably doesn't have a CDN connected to it.
+
